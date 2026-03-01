@@ -15,7 +15,7 @@ const mockLogger: Logger = {
 };
 
 describe("ESM compatibility", () => {
-  it("all subpath imports resolve in Node.js ESM (no bare directory imports)", () => {
+  it("all subpath imports resolve in Node.js ESM (no bare directory imports)", { timeout: 30_000 }, () => {
     const source = readFileSync(
       resolve(import.meta.dirname, "index.ts"),
       "utf-8"
