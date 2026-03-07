@@ -112,6 +112,32 @@ describe("fromFullStream", () => {
     });
   });
 
+  describe("fullStream v6 (text property)", () => {
+    it("extracts text-delta with text property (AI SDK v6)", async () => {
+      const stream = events([
+        { type: "text-delta", id: "0", text: "hello" },
+        { type: "text-delta", id: "0", text: " world" },
+      ]);
+      expect(await collect(fromFullStream(stream))).toBe("hello world");
+    });
+
+    it("injects separator between steps with text property", async () => {
+      const stream = events([
+        { type: "text-delta", id: "0", text: "step 1." },
+        { type: "step-finish" },
+        { type: "text-delta", id: "0", text: "step 2." },
+      ]);
+      expect(await collect(fromFullStream(stream))).toBe("step 1.\n\nstep 2.");
+    });
+
+    it("prefers text over textDelta when both present", async () => {
+      const stream = events([
+        { type: "text-delta", text: "v6", textDelta: "v5" },
+      ]);
+      expect(await collect(fromFullStream(stream))).toBe("v6");
+    });
+  });
+
   describe("mixed and edge cases", () => {
     it("returns empty string for empty stream", async () => {
       const stream = events([]);
