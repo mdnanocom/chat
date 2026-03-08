@@ -144,6 +144,12 @@ export class IoRedisStateAdapter implements StateAdapter {
     return null;
   }
 
+  async forceReleaseLock(threadId: string): Promise<void> {
+    this.ensureConnected();
+    const lockKey = this.key("lock", threadId);
+    await this.client.del(lockKey);
+  }
+
   async releaseLock(lock: Lock): Promise<void> {
     this.ensureConnected();
 
