@@ -556,7 +556,7 @@ export class TelegramAdapter
 
     const card = extractCard(message);
     const replyMarkup = card ? cardToTelegramInlineKeyboard(card) : undefined;
-    const parseMode = card ? TELEGRAM_MARKDOWN_PARSE_MODE : undefined;
+    const parseMode = this.resolveParseMode(message, card);
     const text = this.truncateMessage(
       convertEmojiPlaceholders(
         card
@@ -642,7 +642,7 @@ export class TelegramAdapter
 
     const card = extractCard(message);
     const replyMarkup = card ? cardToTelegramInlineKeyboard(card) : undefined;
-    const parseMode = card ? TELEGRAM_MARKDOWN_PARSE_MODE : undefined;
+    const parseMode = this.resolveParseMode(message, card);
     const text = this.truncateMessage(
       convertEmojiPlaceholders(
         card
@@ -1390,6 +1390,15 @@ export class TelegramAdapter
     }
 
     return value.replace(LEADING_AT_PATTERN, "").trim() || "bot";
+  }
+
+  private resolveParseMode(
+    message: AdapterPostableMessage,
+    card: ReturnType<typeof extractCard>
+  ): string | undefined {
+    const hasMarkdown =
+      typeof message === "object" && message !== null && "markdown" in message;
+    return card || hasMarkdown ? TELEGRAM_MARKDOWN_PARSE_MODE : undefined;
   }
 
   private truncateMessage(text: string): string {
