@@ -531,7 +531,26 @@ describe("ThreadImpl", () => {
       }
     });
 
-    it("should pass stream options from current message context", async () => {
+    it.each([
+      {
+        expectedTeamId: "T123",
+        label: "team_id",
+        raw: { team_id: "T123", type: "app_mention" },
+      },
+      {
+        expectedTeamId: "T234",
+        label: "team string",
+        raw: { team: "T234", type: "message" },
+      },
+      {
+        expectedTeamId: "T345",
+        label: "team.id",
+        raw: { team: { id: "T345" }, type: "block_actions" },
+      },
+    ])("should pass stream options from Slack current message context via $label", async ({
+      raw,
+      expectedTeamId,
+    }) => {
       const mockStream = vi.fn().mockResolvedValue({
         id: "msg-stream",
         threadId: "t1",
@@ -539,7 +558,6 @@ describe("ThreadImpl", () => {
       });
       mockAdapter.stream = mockStream;
 
-      // Create thread with current message context
       const threadWithContext = new ThreadImpl({
         id: "slack:C123:1234.5678",
         adapter: mockAdapter,
@@ -550,7 +568,7 @@ describe("ThreadImpl", () => {
           threadId: "slack:C123:1234.5678",
           text: "test",
           formatted: { type: "root", children: [] },
-          raw: { team_id: "T123" },
+          raw,
           author: {
             userId: "U456",
             userName: "user",
@@ -565,6 +583,65 @@ describe("ThreadImpl", () => {
 
       const textStream = createTextStream(["Hello"]);
       await threadWithContext.post(textStream);
+
+      expect(mockStream).toHaveBeenCalledWith(
+        "slack:C123:1234.5678",
+        expect.any(Object),
+        expect.objectContaining({
+          recipientUserId: "U456",
+          recipientTeamId: expectedTeamId,
+        })
+      );
+    });
+
+    it("should derive recipientTeamId from Slack block_actions payloads for structured streams", async () => {
+      const mockStream = vi.fn().mockResolvedValue({
+        id: "msg-stream",
+        threadId: "t1",
+        raw: "Hello",
+      });
+      mockAdapter.stream = mockStream;
+
+      const threadWithActionContext = new ThreadImpl({
+        id: "slack:C123:1234.5678",
+        adapter: mockAdapter,
+        channelId: "C123",
+        stateAdapter: mockState,
+        currentMessage: {
+          id: "action-msg",
+          threadId: "slack:C123:1234.5678",
+          text: "",
+          formatted: { type: "root", children: [] },
+          raw: {
+            actions: [
+              { action_id: "select-option", selected_option: { value: "option-a" } },
+            ],
+            team: { domain: "workspace", id: "T123" },
+            type: "block_actions",
+          },
+          author: {
+            userId: "U456",
+            userName: "user",
+            fullName: "Test User",
+            isBot: false,
+            isMe: false,
+          },
+          metadata: { dateSent: new Date(), edited: false },
+          attachments: [],
+        },
+      });
+
+      async function* structuredStream(): AsyncIterable<string | StreamChunk> {
+        yield "Picking option...";
+        yield {
+          id: "task-1",
+          status: "pending",
+          title: "Thinking",
+          type: "task_update",
+        };
+      }
+
+      await threadWithActionContext.post(structuredStream());
 
       expect(mockStream).toHaveBeenCalledWith(
         "slack:C123:1234.5678",

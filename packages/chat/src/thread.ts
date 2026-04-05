@@ -108,6 +108,62 @@ function isAsyncIterable(
   );
 }
 
+/**
+ * Slack payloads carry the workspace ID in a few different shapes depending on
+ * the webhook type. Message events usually expose `team_id`, while interactive
+ * payloads commonly expose `team.id`.
+ */
+function extractSlackRecipientTeamId(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+
+  const payload = raw as {
+    authorizations?: Array<{ team_id?: unknown }>;
+    team?: { id?: unknown; team_id?: unknown } | string;
+    team_id?: unknown;
+    user?: { team_id?: unknown };
+  };
+
+  if (typeof payload.team_id === "string" && payload.team_id.length > 0) {
+    return payload.team_id;
+  }
+
+  if (typeof payload.team === "string" && payload.team.length > 0) {
+    return payload.team;
+  }
+
+  if (payload.team && typeof payload.team === "object") {
+    if (typeof payload.team.id === "string" && payload.team.id.length > 0) {
+      return payload.team.id;
+    }
+
+    if (
+      typeof payload.team.team_id === "string" &&
+      payload.team.team_id.length > 0
+    ) {
+      return payload.team.team_id;
+    }
+  }
+
+  if (
+    typeof payload.user?.team_id === "string" &&
+    payload.user.team_id.length > 0
+  ) {
+    return payload.user.team_id;
+  }
+
+  const authorizationTeamId = payload.authorizations?.find(
+    (authorization) =>
+      typeof authorization.team_id === "string" &&
+      authorization.team_id.length > 0
+  )?.team_id;
+
+  return typeof authorizationTeamId === "string"
+    ? authorizationTeamId
+    : undefined;
+}
+
 export class ThreadImpl<TState = Record<string, unknown>>
   implements Thread<TState>
 {
@@ -499,12 +555,9 @@ export class ThreadImpl<TState = Record<string, unknown>>
     const options: StreamOptions = {};
     if (this._currentMessage) {
       options.recipientUserId = this._currentMessage.author.userId;
-      // Extract teamId from raw Slack payload
-      const raw = this._currentMessage.raw as {
-        team_id?: string;
-        team?: string;
-      };
-      options.recipientTeamId = raw?.team_id ?? raw?.team;
+      options.recipientTeamId = extractSlackRecipientTeamId(
+        this._currentMessage.raw
+      );
     }
 
     // Use native streaming if adapter supports it

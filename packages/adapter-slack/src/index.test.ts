@@ -2148,6 +2148,7 @@ interface MockableClient {
     update: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
   };
+  chatStream: ReturnType<typeof vi.fn>;
   conversations: {
     open: ReturnType<typeof vi.fn>;
     replies: ReturnType<typeof vi.fn>;
