@@ -3148,7 +3148,9 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
 
     let first = true;
     let lastAppended = "";
-    const renderer = new StreamingMarkdownRenderer();
+    const renderer = new StreamingMarkdownRenderer({
+      wrapTablesForAppend: false,
+    });
 
     /**
      * Helper to flush markdown text delta to the stream.
