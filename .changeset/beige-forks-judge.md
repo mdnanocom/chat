@@ -1,5 +1,5 @@
 ---
-"chat": minor
+"chat": patch
 ---
 
 Fix Slack structured streaming when `thread.post(stream)` is called from a handler created by an interactive (`block_actions`) payload.
