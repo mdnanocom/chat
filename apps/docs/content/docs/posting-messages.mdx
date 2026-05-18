@@ -24,7 +24,7 @@ This sends the string directly without any formatting conversion.
 
 ## Markdown
 
-Pass a `{ markdown }` object to have the SDK render standard markdown on each platform — passed through to Slack's native `markdown_text` field, converted to HTML for Teams, and so on.
+Pass a `{ markdown }` object to have the SDK render standard markdown on each platform — emitted as a Slack `markdown` Block Kit block (which renders GFM tables, headings, lists, bold/italic, and code fences natively), converted to HTML for Teams, and so on.
 
 ```typescript title="lib/bot.ts" lineNumbers
 await thread.post({

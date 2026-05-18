@@ -1,10 +1,13 @@
 /**
  * Slack format conversion.
  *
- * Outgoing: Slack now natively renders markdown via the `markdown_text` field
- * on chat.postMessage / postEphemeral / update / scheduleMessage. We pass
- * markdown through there and let Slack handle it. Interactive `response_url`
- * payloads do not accept `markdown_text`, so those still use Slack mrkdwn text.
+ * Outgoing: Slack natively renders markdown — including GFM tables — via the
+ * `{ type: "markdown" }` Block Kit block. We emit that block on
+ * chat.postMessage / postEphemeral / update / scheduleMessage and let Slack
+ * handle it. (The top-level `markdown_text` parameter is a stripped-down
+ * renderer that does NOT support tables, so we avoid it.) Interactive
+ * `response_url` payloads do not accept `markdown_text` or markdown blocks,
+ * so those still use Slack mrkdwn text.
  *
  * Incoming: Slack `message` events still deliver text as mrkdwn
  * (`*bold*`, `<@U123>`, `<url|text>`), so the toAst parser stays.
@@ -38,12 +41,24 @@ import {
 // any word character, so email addresses like `user@example.com` are left alone.
 const BARE_MENTION_REGEX = /(?<![<\w])@(\w+)/g;
 
-export type SlackTextPayload = { text: string } | { markdown_text: string };
+/**
+ * A Slack `{ type: "markdown" }` Block Kit block. Slack renders the contained
+ * markdown natively — including GFM tables, bold/italic, lists, headings, code
+ * fences, and blockquotes.
+ */
+export interface SlackMarkdownBlock {
+  text: string;
+  type: "markdown";
+}
+
+export type SlackTextPayload =
+  | { text: string }
+  | { blocks: [SlackMarkdownBlock]; text: string };
 
 export class SlackFormatConverter extends BaseFormatConverter {
   /**
-   * Render an AST to standard markdown. Slack accepts this directly via
-   * `markdown_text` and the `markdown` block.
+   * Render an AST to standard markdown. Slack accepts this directly inside a
+   * `{ type: "markdown" }` block.
    */
   fromAst(ast: Root): string {
     return stringifyMarkdown(ast);
@@ -85,13 +100,21 @@ export class SlackFormatConverter extends BaseFormatConverter {
    * Build the Slack API payload fields for a message.
    *
    * - `string` / `{ raw }` → `{ text }` (plain — preserves literal `*`, `_`, etc.)
-   * - `{ markdown }` / `{ ast }` → `{ markdown_text }` (Slack renders natively)
+   * - `{ markdown }` / `{ ast }` → `{ text, blocks: [{ type: "markdown", text }] }`
+   *   so Slack renders natively, including GFM tables.
    *
    * Bare `@user` mentions are rewritten to `<@user>` and `:emoji:` placeholders
    * are normalized for Slack in all branches.
    *
-   * Note: `markdown_text` has a 12,000 character limit; `text` allows ~40,000.
-   * Note: `markdown_text` is mutually exclusive with `text` and `blocks`.
+   * Notes:
+   * - The `text` field on the markdown-block branches doubles as the
+   *   notification / accessibility fallback. The Slack WebClient warns when
+   *   `blocks` is set without `text`.
+   * - Slack's `markdown` block accepts up to ~12,000 characters of markdown.
+   * - We deliberately do NOT use the top-level `markdown_text` parameter:
+   *   it goes through a stripped-down renderer that does not support GFM
+   *   tables (they appear as raw `|`-delimited text). The `markdown` block
+   *   supports tables and everything else `markdown_text` supports.
    */
   toSlackPayload(message: AdapterPostableMessage): SlackTextPayload {
     if (typeof message === "string") {
@@ -101,10 +124,12 @@ export class SlackFormatConverter extends BaseFormatConverter {
       return { text: this.finalize(message.raw) };
     }
     if ("markdown" in message) {
-      return { markdown_text: this.finalize(message.markdown) };
+      const text = this.finalize(message.markdown);
+      return { text, blocks: [{ type: "markdown", text }] };
     }
     if ("ast" in message) {
-      return { markdown_text: this.finalize(stringifyMarkdown(message.ast)) };
+      const text = this.finalize(stringifyMarkdown(message.ast));
+      return { text, blocks: [{ type: "markdown", text }] };
     }
     return { text: "" };
   }

@@ -7578,6 +7578,153 @@ describe("stream with empty threadTs", () => {
   });
 });
 
+describe("stream: GFM table post-rewrite (regression: #440)", () => {
+  function createStreamerMock() {
+    return {
+      append: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue({
+        ok: true,
+        ts: "1700000001.000001",
+        message: { ts: "1700000001.000001" },
+      }),
+    };
+  }
+
+  it("rewrites the streamed message as a markdown block when text contains a table", async () => {
+    const adapter = createSlackAdapter({
+      botToken: "xoxb-test-token",
+      signingSecret: "test-signing-secret",
+      logger: mockLogger,
+    });
+    const streamerMock = createStreamerMock();
+    mockClientMethod(
+      adapter,
+      "chatStream",
+      vi.fn(() => streamerMock)
+    );
+    const updateMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, ts: "1700000001.000001" });
+    mockClientMethod(adapter, "chat.update", updateMock);
+
+    async function* chunks() {
+      yield "Here is a table:\n\n";
+      yield "| A | B |\n";
+      yield "|---|---|\n";
+      yield "| 1 | 2 |\n";
+    }
+
+    await adapter.stream("slack:C123:1700000000.000001", chunks(), {
+      recipientUserId: "U123",
+      recipientTeamId: "T123",
+    });
+
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const args = updateMock.mock.calls[0][0];
+    expect(args.channel).toBe("C123");
+    expect(args.ts).toBe("1700000001.000001");
+    expect(args.blocks).toEqual([
+      expect.objectContaining({
+        type: "markdown",
+        text: expect.stringContaining("| A | B |"),
+      }),
+    ]);
+    expect(args.text).toContain("| A | B |");
+  });
+
+  it("does not rewrite when streamed text has no table", async () => {
+    const adapter = createSlackAdapter({
+      botToken: "xoxb-test-token",
+      signingSecret: "test-signing-secret",
+      logger: mockLogger,
+    });
+    const streamerMock = createStreamerMock();
+    mockClientMethod(
+      adapter,
+      "chatStream",
+      vi.fn(() => streamerMock)
+    );
+    const updateMock = vi.fn().mockResolvedValue({ ok: true });
+    mockClientMethod(adapter, "chat.update", updateMock);
+
+    async function* chunks() {
+      yield "**Bold** message with _italic_ and a list:\n";
+      yield "- item one\n- item two\n";
+    }
+
+    await adapter.stream("slack:C123:1700000000.000001", chunks(), {
+      recipientUserId: "U123",
+      recipientTeamId: "T123",
+    });
+
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("does not rewrite when caller supplies explicit stopBlocks", async () => {
+    const adapter = createSlackAdapter({
+      botToken: "xoxb-test-token",
+      signingSecret: "test-signing-secret",
+      logger: mockLogger,
+    });
+    const streamerMock = createStreamerMock();
+    mockClientMethod(
+      adapter,
+      "chatStream",
+      vi.fn(() => streamerMock)
+    );
+    const updateMock = vi.fn().mockResolvedValue({ ok: true });
+    mockClientMethod(adapter, "chat.update", updateMock);
+
+    async function* chunks() {
+      yield "| A | B |\n|---|---|\n| 1 | 2 |\n";
+    }
+
+    await adapter.stream("slack:C123:1700000000.000001", chunks(), {
+      recipientUserId: "U123",
+      recipientTeamId: "T123",
+      stopBlocks: [{ type: "section", text: { type: "mrkdwn", text: "done" } }],
+    });
+
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("swallows errors from the rewrite (best-effort) and still returns the streamed message id", async () => {
+    const adapter = createSlackAdapter({
+      botToken: "xoxb-test-token",
+      signingSecret: "test-signing-secret",
+      logger: mockLogger,
+    });
+    const streamerMock = createStreamerMock();
+    mockClientMethod(
+      adapter,
+      "chatStream",
+      vi.fn(() => streamerMock)
+    );
+    let updateCalls = 0;
+    mockClientMethod(
+      adapter,
+      "chat.update",
+      vi.fn().mockImplementation(() => {
+        updateCalls += 1;
+        return Promise.reject(new Error("boom"));
+      })
+    );
+
+    async function* chunks() {
+      yield "Here is a table:\n\n| A | B |\n|---|---|\n| 1 | 2 |\n";
+    }
+
+    const result = await adapter.stream(
+      "slack:C123:1700000000.000001",
+      chunks(),
+      { recipientUserId: "U123", recipientTeamId: "T123" }
+    );
+
+    expect(result.id).toBe("1700000001.000001");
+    expect(updateCalls).toBe(1);
+  });
+});
+
 describe("scheduleMessage with empty threadTs", () => {
   it("normalizes empty threadTs to undefined", async () => {
     const adapter = createSlackAdapter({

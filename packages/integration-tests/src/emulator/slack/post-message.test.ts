@@ -178,7 +178,7 @@ describe("Slack emulator: chat.postMessage round-trip", () => {
     expect(replies).toHaveLength(0);
   });
 
-  it("sends markdown via the markdown_text channel", async () => {
+  it("sends markdown via a markdown Block Kit block", async () => {
     await setupChat();
 
     chat.onNewMention(async (thread) => {
@@ -188,9 +188,10 @@ describe("Slack emulator: chat.postMessage round-trip", () => {
     const threadTs = "1700000000.000005";
     await deliverMention(threadTs);
 
-    // The emulator only stores `text`, but Slack allows posts that have a
-    // markdown_text body and an empty plain text. Verify the post landed at
-    // all (any new message in the channel) so the round-trip succeeded.
+    // We send markdown as `{ text, blocks: [{ type: "markdown", text }] }`
+    // (not via the top-level `markdown_text` parameter, which does not render
+    // GFM tables). Verify the post landed in the channel so the round-trip
+    // succeeded — the emulator persists the `text` fallback.
     const replies = emulator.slackStore.messages
       .all()
       .filter(

@@ -119,6 +119,18 @@ const TRAILING_SLASH_PATTERN = /\/$/;
 const UNFURL_WAIT_MS = 2000;
 const UNFURL_POLL_MS = 150;
 
+/**
+ * Detect a GFM markdown table — a header row followed by a delimiter row of
+ * `---`/`:--:` segments. Used to decide whether a streamed Slack message
+ * needs to be rewritten as a `markdown` Block Kit block after streaming
+ * completes (the streaming API's `markdown_text` channel does not render
+ * tables).
+ */
+const MARKDOWN_TABLE_PATTERN = /(?:^|\n)\|.*\|.*\n\|[\s:|-]+\|/;
+function containsMarkdownTable(text: string): boolean {
+  return MARKDOWN_TABLE_PATTERN.test(text);
+}
+
 interface SlackUnfurl {
   description?: string;
   imageUrl?: string;
@@ -3241,7 +3253,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
       this.logger.debug("Slack API: chat.postMessage", {
         channel,
         threadTs,
-        payloadKey: "markdown_text" in payload ? "markdown_text" : "text",
+        payloadKey: "blocks" in payload ? "blocks" : "text",
       });
 
       const result = await this._client.chat.postMessage(
@@ -3323,7 +3335,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
         channel,
         threadTs,
         userId,
-        payloadKey: "markdown_text" in payload ? "markdown_text" : "text",
+        payloadKey: "blocks" in payload ? "blocks" : "text",
       });
 
       const result = await this._client.chat.postEphemeral(
@@ -3433,7 +3445,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
         channel,
         threadTs,
         postAt: postAtUnix,
-        payloadKey: "markdown_text" in payload ? "markdown_text" : "text",
+        payloadKey: "blocks" in payload ? "blocks" : "text",
       });
 
       const result = await this._client.chat.scheduleMessage({
@@ -3659,7 +3671,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
       this.logger.debug("Slack API: chat.update", {
         channel,
         messageId,
-        payloadKey: "markdown_text" in payload ? "markdown_text" : "text",
+        payloadKey: "blocks" in payload ? "blocks" : "text",
       });
 
       const result = await this._client.chat.update(
@@ -4131,6 +4143,43 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     const messageTs = (result.message?.ts ?? result.ts) as string;
 
     this.logger.debug("Slack: stream complete", { messageId: messageTs });
+
+    // Slack's streaming API only accepts `markdown_text` for incremental
+    // chunks, which does NOT render GFM tables (they appear as raw `|`-
+    // delimited text during streaming). If the caller didn't supply explicit
+    // stopBlocks and the finalized text contains a markdown table, rewrite
+    // the message with a `markdown` Block Kit block so the table renders
+    // natively. This causes a brief visual flash at the end of streaming —
+    // it's an unavoidable Slack API limitation.
+    if (
+      !options?.stopBlocks &&
+      messageTs &&
+      containsMarkdownTable(finalCommittable)
+    ) {
+      try {
+        await this._client.chat.update(
+          await this.withToken({
+            channel,
+            ts: messageTs,
+            text: finalCommittable,
+            blocks: [
+              // biome-ignore lint/suspicious/noExplicitAny: markdown block type not in older @slack/web-api types
+              { type: "markdown", text: finalCommittable } as any,
+            ],
+          })
+        );
+        this.logger.debug(
+          "Slack: stream message rewritten with markdown block",
+          { messageId: messageTs }
+        );
+      } catch (error) {
+        this.logger.warn(
+          "Slack: failed to rewrite streamed message with markdown block; " +
+            "table content may render as raw pipes",
+          { messageId: messageTs, error }
+        );
+      }
+    }
 
     return {
       id: messageTs,

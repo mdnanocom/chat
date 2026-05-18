@@ -52,13 +52,16 @@ describe("SlackFormatConverter", () => {
       });
     });
 
-    it("routes markdown to markdown_text", () => {
+    it("routes markdown to a markdown Block Kit block (with text fallback)", () => {
       expect(
         converter.toSlackPayload({ markdown: "## Heading\n\n- a\n- b" })
-      ).toEqual({ markdown_text: "## Heading\n\n- a\n- b" });
+      ).toEqual({
+        text: "## Heading\n\n- a\n- b",
+        blocks: [{ type: "markdown", text: "## Heading\n\n- a\n- b" }],
+      });
     });
 
-    it("routes ast to markdown_text via stringifyMarkdown", () => {
+    it("routes ast to a markdown block via stringifyMarkdown", () => {
       const ast = {
         type: "root" as const,
         children: [
@@ -73,14 +76,27 @@ describe("SlackFormatConverter", () => {
           },
         ],
       };
-      const result = converter.toSlackPayload({ ast });
-      expect(result).toHaveProperty("markdown_text");
-      expect((result as { markdown_text: string }).markdown_text).toContain(
-        "**bold**"
-      );
+      const result = converter.toSlackPayload({ ast }) as {
+        text: string;
+        blocks: [{ type: "markdown"; text: string }];
+      };
+      expect(result.blocks[0].type).toBe("markdown");
+      expect(result.blocks[0].text).toContain("**bold**");
+      expect(result.text).toBe(result.blocks[0].text);
     });
 
-    it("preserves tables when rendering ast to markdown_text", () => {
+    it("emits a markdown block (not markdown_text) so GFM tables render natively", () => {
+      const result = converter.toSlackPayload({
+        markdown: "Heading\n\n| A | B |\n|---|---|\n| 1 | 2 |",
+      }) as { text: string; blocks: [{ type: "markdown"; text: string }] };
+      expect(result).not.toHaveProperty("markdown_text");
+      expect(result.blocks).toHaveLength(1);
+      expect(result.blocks[0].type).toBe("markdown");
+      expect(result.blocks[0].text).toContain("| A | B |");
+      expect(result.blocks[0].text).toContain("| 1 | 2 |");
+    });
+
+    it("preserves tables when rendering ast to a markdown block", () => {
       const ast = {
         type: "root" as const,
         children: [
@@ -118,11 +134,13 @@ describe("SlackFormatConverter", () => {
           },
         ],
       };
-      const result = converter.toSlackPayload({ ast });
-      expect(result).toHaveProperty("markdown_text");
-      const text = (result as { markdown_text: string }).markdown_text;
-      expect(text).toContain("| A | B |");
-      expect(text).toContain("| 1 | 2 |");
+      const result = converter.toSlackPayload({ ast }) as {
+        text: string;
+        blocks: [{ type: "markdown"; text: string }];
+      };
+      expect(result.blocks[0].type).toBe("markdown");
+      expect(result.blocks[0].text).toContain("| A | B |");
+      expect(result.blocks[0].text).toContain("| 1 | 2 |");
     });
   });
 
@@ -154,7 +172,10 @@ describe("SlackFormatConverter", () => {
     it("does not double-wrap existing mentions in markdown", () => {
       expect(
         converter.toSlackPayload({ markdown: "Hey <@U12345>. Please select" })
-      ).toEqual({ markdown_text: "Hey <@U12345>. Please select" });
+      ).toEqual({
+        text: "Hey <@U12345>. Please select",
+        blocks: [{ type: "markdown", text: "Hey <@U12345>. Please select" }],
+      });
     });
 
     it("rewrites bare @mentions in plain strings", () => {
@@ -166,7 +187,10 @@ describe("SlackFormatConverter", () => {
     it("rewrites bare @mentions in markdown", () => {
       expect(
         converter.toSlackPayload({ markdown: "Hey @george. Please select" })
-      ).toEqual({ markdown_text: "Hey <@george>. Please select" });
+      ).toEqual({
+        text: "Hey <@george>. Please select",
+        blocks: [{ type: "markdown", text: "Hey <@george>. Please select" }],
+      });
     });
 
     it("does not mangle email addresses in plain strings", () => {

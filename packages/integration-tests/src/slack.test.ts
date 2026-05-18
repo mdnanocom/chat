@@ -361,12 +361,54 @@ describe("Slack Integration", () => {
       });
       await tracker.waitForAll();
 
-      // Markdown is passed through to Slack's markdown_text field for native rendering
+      // Markdown is sent as a `markdown` Block Kit block (with text fallback)
+      // so Slack renders it natively, including GFM tables. The top-level
+      // `markdown_text` parameter is NOT used because it does not support tables.
       expect(mockClient.chat.postMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          markdown_text: "**Bold** and _italic_ and `code`",
+          text: "**Bold** and _italic_ and `code`",
+          blocks: [
+            {
+              type: "markdown",
+              text: "**Bold** and _italic_ and `code`",
+            },
+          ],
         })
       );
+      const postArgs = mockClient.chat.postMessage.mock.calls.at(-1)?.[0];
+      expect(postArgs).not.toHaveProperty("markdown_text");
+    });
+
+    it("should send GFM tables as a markdown block (regression: #440)", async () => {
+      chat.onNewMention(async (thread) => {
+        await thread.post({
+          markdown:
+            "Here is a table:\n\n| Col A | Col B |\n|-------|-------|\n| 1     | 2     |",
+        });
+      });
+
+      const event = createSlackEvent({
+        type: "app_mention",
+        text: `@${SLACK_BOT_USERNAME} table test`,
+        userId: "U_USER_123",
+        messageTs: "1234567890.111111",
+        threadTs: TEST_THREAD_TS,
+        channel: TEST_CHANNEL,
+      });
+
+      await chat.webhooks.slack(createSlackWebhookRequest(event), {
+        waitUntil: tracker.waitUntil,
+      });
+      await tracker.waitForAll();
+
+      const postArgs = mockClient.chat.postMessage.mock.calls.at(-1)?.[0];
+      expect(postArgs).not.toHaveProperty("markdown_text");
+      expect(postArgs.blocks).toEqual([
+        expect.objectContaining({
+          type: "markdown",
+          text: expect.stringContaining("| Col A | Col B |"),
+        }),
+      ]);
     });
 
     it("should convert @mentions to Slack format in posted messages", async () => {
@@ -769,7 +811,13 @@ describe("Slack Integration", () => {
       );
       expect(mockClient.chat.postMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          markdown_text: expect.stringContaining("Here's your file:"),
+          text: expect.stringContaining("Here's your file:"),
+          blocks: [
+            expect.objectContaining({
+              type: "markdown",
+              text: expect.stringContaining("Here's your file:"),
+            }),
+          ],
         })
       );
     });
